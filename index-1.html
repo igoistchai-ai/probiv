@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Граф узлов</title>
+<style>
+  :root{
+    --bg: #08080a;
+    --panel: #0f0f12;
+    --card: #131317;
+    --card-border: rgba(255,255,255,0.14);
+    --card-border-hover: rgba(255,255,255,0.34);
+    --text: #f2f2f3;
+    --text-dim: #9a9aa0;
+    --text-faint: #55555c;
+    --edge: rgba(255,255,255,0.38);
+    --edge-glow: rgba(255,255,255,0.10);
+    --edge-active: #ffffff;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    box-sizing: border-box;
+  }
+  *{ box-sizing: inherit; }
+  html,body{
+    height:100%;
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  body{
+    padding-top: env(safe-area-inset-top,0px);
+    padding-bottom: env(safe-area-inset-bottom,0px);
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(255,255,255,0.025), transparent 45%),
+      radial-gradient(circle at 80% 70%, rgba(255,255,255,0.02), transparent 50%);
+  }
+
+  /* ================= TOP BAR ================= */
+  .topbar{
+    position:relative; z-index:30;
+    display:flex; flex-direction:column; gap:12px;
+    padding:18px 24px 14px;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+    background:rgba(8,8,10,0.9);
+    backdrop-filter: blur(6px);
+  }
+  .row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+  .search{
+    flex:1; min-width:200px;
+    display:flex; align-items:center; gap:9px;
+    background:var(--panel);
+    border:1px solid rgba(255,255,255,0.1);
+    border-radius:9px;
+    padding:9px 13px;
+    transition:border-color .15s ease;
+  }
+  .search:focus-within{ border-color:rgba(255,255,255,0.32); }
+  .search svg{ flex:none; opacity:.5; }
+  .search input{
+    flex:1; background:none; border:none; outline:none;
+    color:var(--text); font-size:14px; font-family:var(--font);
+  }
+  .search input::placeholder{ color:var(--text-faint); }
+
+  select, .toggle-fav, .btn-new, .icon-btn{
+    appearance:none;
+    background:var(--panel);
+    border:1px solid rgba(255,255,255,0.1);
+    color:var(--text-dim);
+    border-radius:9px;
+    padding:9px 13px;
+    font-size:13px;
+    font-family:var(--font);
+    cursor:pointer;
+    outline:none;
+  }
+  select:hover, .toggle-fav:hover, .icon-btn:hover{ border-color:rgba(255,255,255,0.3); color:var(--text); }
+
+  .toggle-fav{ display:flex; align-items:center; gap:7px; }
+  .toggle-fav.active{ color:var(--text); border-color:rgba(255,255,255,0.4); background:rgba(255,255,255,0.06); }
+
+  .btn-new{
+    color:#0a0a0b; background:var(--text); border-color:var(--text);
+    font-weight:600; display:flex; align-items:center; gap:6px;
+  }
+  .btn-new:hover{ opacity:.88; }
+
+  .icon-btn{ width:36px; height:36px; padding:0; display:flex; align-items:center; justify-content:center; }
+
+  .meta-row{
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:12px; color:var(--text-faint);
+  }
+  .crumbs{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; color:var(--text-dim); }
+  .crumbs .sep{ color:var(--text-faint); }
+  .crumbs button{ background:none; border:none; color:var(--text-dim); font-size:12px; cursor:pointer; padding:2px 4px; font-family:var(--font); }
+  .crumbs button:hover{ color:var(--text); }
+  .crumbs button.current{ color:var(--text); cursor:default; font-weight:600; }
+
+  /* ================= CANVAS ================= */
+  .canvas-wrap{
+    position:relative; width:100%;
+    height:calc(100% - 100px);
+    overflow:hidden; cursor:grab;
+    background:
+      radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1px);
+    background-size: 26px 26px;
+  }
+  .canvas-wrap.panning{ cursor:grabbing; }
+  .canvas{ position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform; }
+
+  svg.edges{ position:absolute; top:0; left:0; overflow:visible; pointer-events:none; }
+  svg.edges path.edge-glow{ fill:none; stroke:var(--edge-glow); stroke-width:7; stroke-linecap:round; }
+  svg.edges path.edge-line{ fill:none; stroke:var(--edge); stroke-width:2; stroke-linecap:round; transition:stroke .18s ease, stroke-width .18s ease; }
+  svg.edges path.edge-line.hl{ stroke:var(--edge-active); stroke-width:2.6; }
+  svg.edges circle.edge-dot{ fill:var(--edge); }
+  svg.edges path.drag-line{ fill:none; stroke:var(--edge-active); stroke-width:2.4; stroke-dasharray:6 5; }
+
+  /* ---- Node card ---- */
+  .node{
+    position:absolute;
+    transform:translate(0, -50%);
+  }
+  .node-card{
+    display:flex; align-items:center; gap:10px;
+    background:var(--card);
+    border:1.5px solid var(--card-border);
+    border-radius:11px;
+    padding:11px 14px;
+    min-width:170px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 6px 16px rgba(0,0,0,0.35);
+    transition: border-color .15s ease, box-shadow .15s ease, transform .1s ease;
+    cursor:pointer;
+    position:relative;
+  }
+  .node-card:hover{
+    border-color:var(--card-border-hover);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 8px 22px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+  }
+  .node.root .node-card{
+    border-color:rgba(255,255,255,0.28);
+    background:linear-gradient(180deg, #17171b, #121215);
+  }
+  .node.open .node-card{ border-color:var(--edge-active); }
+  .node.match .node-card{ border-color:#fff; box-shadow:0 0 0 1px #fff, 0 8px 24px rgba(255,255,255,0.08); }
+  .node.dimmed .node-card{ opacity:.22; }
+
+  .node-icon{ font-size:16px; flex:none; width:18px; text-align:center; opacity:.9; }
+  .node-body{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .node-title{ font-size:14.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .node-sub{ font-size:11px; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+
+  .node-badge{
+    flex:none; font-size:10.5px; color:var(--text-faint);
+    border:1px solid rgba(255,255,255,0.14); border-radius:6px; padding:2px 6px;
+  }
+
+  .node-actions{
+    position:absolute; top:-13px; right:8px;
+    display:flex; gap:4px;
+    opacity:0; transform:translateY(3px);
+    transition:opacity .12s ease, transform .12s ease;
+  }
+  .node-card:hover .node-actions{ opacity:1; transform:translateY(0); }
+  .node-actions button{
+    width:24px; height:24px; border-radius:7px;
+    background:var(--panel); border:1px solid rgba(255,255,255,0.16);
+    color:var(--text-dim); font-size:12px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .node-actions button:hover{ color:var(--text); border-color:rgba(255,255,255,0.4); }
+  .node-actions button.star.active{ color:#fff; border-color:#fff; }
+
+  .node-handle{
+    position:absolute; right:-8px; top:50%; transform:translateY(-50%);
+    width:15px; height:15px; border-radius:50%;
+    background:var(--card); border:2px solid var(--edge);
+    cursor:crosshair;
+    transition:border-color .12s ease, background .12s ease, transform .12s ease;
+  }
+  .node-handle:hover{ border-color:#fff; background:#fff; transform:translateY(-50%) scale(1.25); }
+
+  .node-collapse{
+    position:absolute; left:-9px; top:50%; transform:translateY(-50%);
+    width:16px; height:16px; border-radius:50%;
+    background:var(--text); color:#0a0a0b;
+    border:none; font-size:10px; line-height:1; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 0 3px var(--bg);
+  }
+
+  /* ---- Empty state ---- */
+  .empty-state{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; color:var(--text-faint); text-align:center; padding:20px;
+  }
+  .empty-state p{ margin:0; font-size:14px; max-width:320px; line-height:1.55; }
+
+  /* ================= MODAL ================= */
+  .overlay{
+    position:fixed; inset:0; z-index:100;
+    background:rgba(0,0,0,0.6);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .overlay[hidden]{ display:none; }
+  .modal{
+    width:100%; max-width:430px;
+    background:var(--panel);
+    border:1.5px solid rgba(255,255,255,0.18);
+    border-radius:16px;
+    padding:22px;
+    display:flex; flex-direction:column; gap:14px;
+    max-height:88vh; overflow-y:auto;
+    box-shadow:0 20px 60px rgba(0,0,0,0.6);
+  }
+  .modal h2{ margin:0; font-size:16px; font-weight:700; }
+  .field{ display:flex; flex-direction:column; gap:6px; }
+  .field label{ font-size:12px; color:var(--text-faint); }
+  .field input, .field textarea{
+    background:var(--bg);
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:9px;
+    padding:9px 12px;
+    color:var(--text);
+    font-family:var(--font);
+    font-size:14px;
+    outline:none;
+    resize:vertical;
+  }
+  .field input:focus, .field textarea:focus{ border-color:rgba(255,255,255,0.4); }
+  .field-row{ display:flex; gap:10px; }
+  .field-row .field{ flex:1; min-width:0; }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
+  .btn{
+    border:1px solid rgba(255,255,255,0.14);
+    background:transparent; color:var(--text-dim);
+    padding:9px 16px; border-radius:9px; font-size:13px;
+    cursor:pointer; font-family:var(--font);
+  }
+  .btn:hover{ color:var(--text); border-color:rgba(255,255,255,0.4); }
+  .btn.primary{ background:var(--text); color:#0a0a0b; border-color:var(--text); font-weight:700; }
+  .btn.primary:hover{ opacity:.88; }
+  .btn.danger{ color:#e57373; border-color:rgba(229,115,115,0.35); }
+  .btn.danger:hover{ border-color:#e57373; }
+
+  .icon-picker{ display:flex; flex-wrap:wrap; gap:6px; }
+  .icon-picker button{
+    width:34px; height:34px; border-radius:9px;
+    border:1px solid rgba(255,255,255,0.12); background:var(--bg);
+    font-size:15px; cursor:pointer; color:var(--text);
+  }
+  .icon-picker button.selected{ border-color:#fff; background:rgba(255,255,255,0.1); }
+
+  /* ================= floating controls ================= */
+  .save-indicator{
+    position:fixed; bottom:calc(18px + env(safe-area-inset-bottom,0px)); right:18px; z-index:40;
+    font-size:11.5px; color:var(--text-faint);
+    background:var(--panel); border:1px solid rgba(255,255,255,0.12);
+    padding:6px 12px; border-radius:20px;
+    opacity:0; transition:opacity .3s ease; pointer-events:none;
+  }
+  .save-indicator.show{ opacity:1; }
+
+  .zoom-controls{
+    position:fixed; bottom:calc(18px + env(safe-area-inset-bottom,0px)); left:18px; z-index:40;
+    display:flex; gap:6px;
+  }
+  .zoom-controls button{
+    width:34px; height:34px; border-radius:9px;
+    border:1px solid rgba(255,255,255,0.14); background:var(--panel);
+    color:var(--text-dim); font-size:16px; cursor:pointer;
+  }
+  .zoom-controls button:hover{ color:var(--text); border-color:rgba(255,255,255,0.4); }
+
+  .hint{
+    position:fixed; top:112px; left:50%; transform:translateX(-50%);
+    font-size:11.5px; color:var(--text-faint);
+    background:var(--panel); border:1px solid rgba(255,255,255,0.1);
+    padding:6px 14px; border-radius:20px; z-index:25;
+    opacity:0; transition:opacity .2s ease; pointer-events:none;
+  }
+  .hint.show{ opacity:1; }
+
+  .file-io{ display:none; }
+
+  @media (max-width: 640px){
+    .topbar{ padding:14px 14px 10px; }
+    select, .toggle-fav{ padding:8px 10px; font-size:12px; }
+    .btn-new span.label-full{ display:none; }
+    .node-title, .node-sub{ max-width:140px; }
+  }
+  @media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <button class="icon-btn" id="backBtn" title="Назад">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" placeholder="Поиск по узлам...">
+    </div>
+    <select id="typeFilter"><option value="">Все типы</option></select>
+    <select id="accessFilter"><option value="">Любой доступ</option></select>
+    <button class="toggle-fav" id="favToggle">★ Избранные</button>
+    <button class="btn-new" id="newRootBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="label-full">Новый узел</span>
+    </button>
+  </div>
+  <div class="meta-row">
+    <div class="crumbs" id="crumbs"></div>
+    <div id="nodeCount">0 узлов</div>
+  </div>
+</div>
+
+<div class="canvas-wrap" id="canvasWrap">
+  <div class="canvas" id="canvas">
+    <svg class="edges" id="edges"></svg>
+  </div>
+  <div class="empty-state" id="emptyState" hidden>
+    <p>Узлов пока нет. Нажмите «Новый узел», затем потяните за точку справа от узла, чтобы создать связанный с ним дочерний узел.</p>
+    <button class="btn-new" id="emptyCreateBtn">+ Создать узел</button>
+  </div>
+</div>
+
+<div class="hint" id="dragHint">Отпустите, чтобы создать связанный узел</div>
+
+<div class="zoom-controls">
+  <button id="zoomOut" title="Уменьшить">−</button>
+  <button id="zoomReset" title="Сбросить" style="font-size:12px;">⤢</button>
+  <button id="zoomIn" title="Увеличить">+</button>
+</div>
+
+<div class="save-indicator" id="saveIndicator">Сохранено</div>
+
+<div class="overlay" id="modalOverlay" hidden>
+  <div class="modal">
+    <h2 id="modalTitle">Новый узел</h2>
+    <div class="field">
+      <label>Название</label>
+      <input id="fTitle" type="text" placeholder="Название узла" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Иконка</label>
+      <div class="icon-picker" id="iconPicker"></div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Тип</label>
+        <input id="fType" type="text" list="typeList" placeholder="категория" autocomplete="off">
+        <datalist id="typeList"></datalist>
+      </div>
+      <div class="field">
+        <label>Доступ</label>
+        <input id="fAccess" type="text" list="accessList" placeholder="метка доступа" autocomplete="off">
+        <datalist id="accessList"></datalist>
+      </div>
+    </div>
+    <div class="field">
+      <label>Ссылка (необязательно)</label>
+      <input id="fUrl" type="text" placeholder="https://...">
+    </div>
+    <div class="field">
+      <label>Заметки</label>
+      <textarea id="fNotes" rows="3" placeholder="Необязательно"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" id="deleteNodeBtn" hidden>Удалить</button>
+      <button class="btn" id="cancelBtn">Отмена</button>
+      <button class="btn primary" id="saveNodeBtn">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="importInput" class="file-io" accept="application/json">
+
+<script>
+(function(){
+  "use strict";
+
+  const STORAGE_KEY = "node-graph-data-v2";
+  const ICONS = ["•","○","◆","▪","☆","▲","■","◇","▸","※","⌘","∙"];
+
+  let state = { nodes:{}, rootIds:[], openPath:[] };
+  let editingNodeId = null, creatingParentId = null, selectedIcon = ICONS[0];
+  let layoutCache = {};
+
+  const el = (id) => document.getElementById(id);
+  const uid = () => 'n_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  const escapeHtml = (s) => { const d=document.createElement("div"); d.textContent=s||""; return d.innerHTML; };
+
+  /* ---------- persistence ---------- */
+  function load(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){ const p = JSON.parse(raw); state.nodes = p.nodes||{}; state.rootIds = p.rootIds||[]; }
+    }catch(e){}
+  }
+  let saveTimer=null;
+  function scheduleSave(){
+    clearTimeout(saveTimer);
+    const ind = el("saveIndicator");
+    ind.textContent = "Сохранение..."; ind.classList.add("show");
+    saveTimer = setTimeout(()=>{
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({nodes:state.nodes, rootIds:state.rootIds})); ind.textContent="Сохранено"; }
+      catch(e){ ind.textContent="Ошибка сохранения"; }
+      setTimeout(()=>ind.classList.remove("show"),1100);
+    },350);
+  }
+
+  /* ---------- node ops ---------- */
+  function createNode(data){
+    const id = uid();
+    state.nodes[id] = {
+      id, title:data.title||"Без названия", icon:data.icon||ICONS[0],
+      parent_id:data.parent_id||null, children:[], favorite:false,
+      type:data.type||"", access:data.access||"", url:data.url||"", notes:data.notes||"",
+      created_at:Date.now(), updated_at:Date.now()
+    };
+    if(data.parent_id){ state.nodes[data.parent_id].children.push(id); }
+    else{ state.rootIds.push(id); }
+    return id;
+  }
+  function deleteNode(id, cascade){
+    const node = state.nodes[id]; if(!node) return;
+    const children = node.children.slice();
+    if(cascade){ children.forEach(c=>deleteNode(c,true)); }
+    else{
+      children.forEach(c=>{
+        state.nodes[c].parent_id = node.parent_id;
+        if(node.parent_id){ state.nodes[node.parent_id].children.push(c); }
+        else{ state.rootIds.push(c); }
+      });
+    }
+    if(node.parent_id){ const p=state.nodes[node.parent_id]; p.children=p.children.filter(c=>c!==id); }
+    else{ state.rootIds = state.rootIds.filter(c=>c!==id); }
+    state.openPath = state.openPath.filter(pid=>pid!==id);
+    delete state.nodes[id];
+  }
+  function allNodes(){ return Object.values(state.nodes); }
+  function getDistinctValues(f){ const s=new Set(); allNodes().forEach(n=>{ if(n[f]) s.add(n[f]); }); return Array.from(s).sort(); }
+  function isDescendant(ancestorId, candidateId){
+    let cur = state.nodes[candidateId];
+    while(cur){ if(cur.id===ancestorId) return true; cur = cur.parent_id? state.nodes[cur.parent_id]:null; }
+    return false;
+  }
+  function reparent(nodeId, newParentId){
+    const node = state.nodes[nodeId];
+    if(node.parent_id){ const oldP=state.nodes[node.parent_id]; oldP.children=oldP.children.filter(c=>c!==nodeId); }
+    else{ state.rootIds = state.rootIds.filter(c=>c!==nodeId); }
+    node.parent_id = newParentId;
+    state.nodes[newParentId].children.push(nodeId);
+  }
+
+  /* ---------- filters ---------- */
+  function getFilters(){
+    return { q: el("searchInput").value.trim().toLowerCase(), type: el("typeFilter").value,
+      access: el("accessFilter").value, favOnly: el("favToggle").classList.contains("active") };
+  }
+  function nodeMatches(n,f){
+    if(f.type && n.type!==f.type) return false;
+    if(f.access && n.access!==f.access) return false;
+    if(f.favOnly && !n.favorite) return false;
+    if(f.q){ const hay=(n.title+" "+n.notes+" "+n.type).toLowerCase(); if(!hay.includes(f.q)) return false; }
+    return true;
+  }
+  function computeVisibility(f){
+    const active = f.q||f.type||f.access||f.favOnly;
+    if(!active) return null;
+    const matchIds = new Set();
+    allNodes().forEach(n=>{ if(nodeMatches(n,f)) matchIds.add(n.id); });
+    const keep = new Set(matchIds);
+    matchIds.forEach(id=>{ let cur=state.nodes[id]; while(cur && cur.parent_id){ keep.add(cur.parent_id); cur=state.nodes[cur.parent_id]; } });
+    return {keep, matchIds};
+  }
+
+  /* ---------- layout / render ---------- */
+  const NODE_H = 64;
+  const LEVEL_W = 280;
+
+  function isOpen(id){ return state.openPath.includes(id); }
+  function toggleOpen(id){
+    const idx = state.openPath.indexOf(id);
+    if(idx>=0){ state.openPath = state.openPath.slice(0, idx); }
+    else{
+      let path=[]; let cur=state.nodes[id];
+      while(cur){ path.unshift(cur.id); cur = cur.parent_id? state.nodes[cur.parent_id]:null; }
+      state.openPath = path;
+    }
+    render();
+  }
+
+  function edgePath(x1,y1,x2,y2){
+    const mx = (x1+x2)/2;
+    return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+  }
+
+  function render(){
+    el("emptyState").hidden = state.rootIds.length !== 0;
+    updateFilterOptions();
+    renderCrumbs();
+
+    const f = getFilters();
+    const vis = computeVisibility(f);
+    const canvas = el("canvas");
+    canvas.querySelectorAll(".node").forEach(n=>n.remove());
+    layoutCache = {};
+
+    let y = 46;
+    const startX = 46;
+    function layoutLevel(ids, depth){
+      ids.forEach(id=>{
+        const node = state.nodes[id];
+        if(vis && !vis.keep.has(id)) return;
+        const x = startX + depth*LEVEL_W;
+        const my = y; y += NODE_H;
+        layoutCache[id] = {x, y:my, depth};
+        if(node.children.length && isOpen(id)) layoutLevel(node.children, depth+1);
+      });
+    }
+    layoutLevel(state.rootIds, 0);
+
+    const maxDepth = Object.values(layoutCache).reduce((m,v)=>Math.max(m,v.depth),0);
+    const totalH = Math.max(y+60, 500);
+    const totalW = Math.max(startX + (maxDepth+2)*LEVEL_W, 900);
+    canvas.style.width = totalW+"px"; canvas.style.height = totalH+"px";
+
+    const svg = el("edges");
+    svg.setAttribute("width", totalW); svg.setAttribute("height", totalH);
+    svg.innerHTML = "";
+
+    let visibleCount = 0;
+    const CARD_W = 190; // approx card width for edge anchor
+
+    Object.keys(layoutCache).forEach(id=>{
+      const node = state.nodes[id];
+      const pos = layoutCache[id];
+      visibleCount++;
+      const isMatch = vis && vis.matchIds.has(id);
+      const dimmed = vis && !vis.matchIds.has(id);
+
+      if(node.parent_id && layoutCache[node.parent_id]){
+        const p = layoutCache[node.parent_id];
+        const x1 = p.x + CARD_W, y1 = p.y, x2 = pos.x, y2 = pos.y;
+        const glow = document.createElementNS("http://www.w3.org/2000/svg","path");
+        glow.setAttribute("class","edge-glow");
+        glow.setAttribute("d", edgePath(x1,y1,x2,y2));
+        svg.appendChild(glow);
+        const line = document.createElementNS("http://www.w3.org/2000/svg","path");
+        line.setAttribute("class","edge-line"+(isMatch?" hl":""));
+        line.setAttribute("d", edgePath(x1,y1,x2,y2));
+        svg.appendChild(line);
+        [ [x1,y1], [x2,y2] ].forEach(([cx,cy])=>{
+          const dot = document.createElementNS("http://www.w3.org/2000/svg","circle");
+          dot.setAttribute("class","edge-dot"); dot.setAttribute("r","3");
+          dot.setAttribute("cx",cx); dot.setAttribute("cy",cy);
+          svg.appendChild(dot);
+        });
+      }
+
+      const div = document.createElement("div");
+      div.className = "node" + (node.parent_id?"":" root") + (isOpen(id)?" open":"") + (isMatch?" match":"") + (dimmed?" dimmed":"");
+      div.style.left = pos.x+"px"; div.style.top = pos.y+"px";
+      div.dataset.id = id;
+
+      const subParts = [];
+      if(node.type) subParts.push(node.type);
+      if(node.access) subParts.push(node.access);
+
+      div.innerHTML = `
+        <div class="node-card" data-action="toggle">
+          <span class="node-icon">${node.icon||""}</span>
+          <div class="node-body">
+            <span class="node-title">${escapeHtml(node.title)}</span>
+            ${subParts.length? `<span class="node-sub">${escapeHtml(subParts.join(" · "))}</span>` : ""}
+          </div>
+          ${node.children.length? `<span class="node-badge">${node.children.length}</span>` : ""}
+          <div class="node-actions">
+            <button class="star ${node.favorite?'active':''}" data-action="fav" title="Избранное">★</button>
+            <button data-action="edit" title="Редактировать">✎</button>
+          </div>
+          ${node.children.length? `<button class="node-collapse" data-action="toggle" title="${isOpen(id)?'Свернуть':'Развернуть'}">${isOpen(id)?'−':'+'}</button>` : ""}
+          <div class="node-handle" data-action="handle" title="Перетащите, чтобы создать связанный узел"></div>
+        </div>
+      `;
+      canvas.appendChild(div);
+    });
+
+    el("nodeCount").textContent = visibleCount + " " + pluralNodes(visibleCount);
+    bindNodeEvents();
+    scheduleSave();
+  }
+
+  function pluralNodes(n){
+    const m10=n%10, m100=n%100;
+    if(m10===1 && m100!==11) return "узел";
+    if([2,3,4].includes(m10) && ![12,13,14].includes(m100)) return "узла";
+    return "узлов";
+  }
+
+  function renderCrumbs(){
+    const wrap = el("crumbs"); wrap.innerHTML="";
+    if(state.openPath.length===0){ wrap.innerHTML = `<span style="color:var(--text-faint)">Корень</span>`; return; }
+    state.openPath.forEach((id,i)=>{
+      const node = state.nodes[id]; if(!node) return;
+      if(i>0){ const sep=document.createElement("span"); sep.className="sep"; sep.textContent="›"; wrap.appendChild(sep); }
+      const btn = document.createElement("button");
+      btn.textContent = node.title;
+      if(i===state.openPath.length-1) btn.classList.add("current");
+      btn.addEventListener("click", ()=>{ state.openPath = state.openPath.slice(0,i+1); render(); });
+      wrap.appendChild(btn);
+    });
+  }
+
+  function updateFilterOptions(){
+    const typeSel = el("typeFilter"), accessSel = el("accessFilter");
+    const curType = typeSel.value, curAccess = accessSel.value;
+    typeSel.innerHTML = `<option value="">Все типы</option>` + getDistinctValues("type").map(v=>`<option ${v===curType?'selected':''}>${escapeHtml(v)}</option>`).join("");
+    accessSel.innerHTML = `<option value="">Любой доступ</option>` + getDistinctValues("access").map(v=>`<option ${v===curAccess?'selected':''}>${escapeHtml(v)}</option>`).join("");
+    el("typeList").innerHTML = getDistinctValues("type").map(v=>`<option value="${escapeHtml(v)}">`).join("");
+    el("accessList").innerHTML = getDistinctValues("access").map(v=>`<option value="${escapeHtml(v)}">`).join("");
+  }
+
+  /* ---------- live drag-to-create-edge ---------- */
+  let dragCreate = null; // {parentId, parentX, parentY}
+
+  function screenToCanvasPoint(clientX, clientY){
+    const wrap = el("canvasWrap");
+    const rect = wrap.getBoundingClientRect();
+    const localX = clientX - rect.left, localY = clientY - rect.top;
+    return { x: (localX - panX)/scale, y: (localY - panY)/scale };
+  }
+
+  function startHandleDrag(id, ev){
+    ev.preventDefault(); ev.stopPropagation();
+    const pos = layoutCache[id];
+    dragCreate = { parentId:id, x1: pos.x+190, y1: pos.y };
+    const svg = el("edges");
+    const line = document.createElementNS("http://www.w3.org/2000/svg","path");
+    line.setAttribute("class","drag-line");
+    line.id = "liveDragLine";
+    svg.appendChild(line);
+    el("dragHint").classList.add("show");
+
+    function move(e){
+      const cx = e.touches? e.touches[0].clientX : e.clientX;
+      const cy = e.touches? e.touches[0].clientY : e.clientY;
+      const pt = screenToCanvasPoint(cx, cy);
+      line.setAttribute("d", edgePath(dragCreate.x1, dragCreate.y1, pt.x, pt.y));
+    }
+    function up(e){
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", up);
+      const existing = document.getElementById("liveDragLine");
+      if(existing) existing.remove();
+      el("dragHint").classList.remove("show");
+      const cx = e.changedTouches? e.changedTouches[0].clientX : e.clientX;
+      const cy = e.changedTouches? e.changedTouches[0].clientY : e.clientY;
+      const targetEl = document.elementFromPoint(cx, cy);
+      const targetNode = targetEl ? targetEl.closest(".node") : null;
+      if(targetNode && targetNode.dataset.id && targetNode.dataset.id !== dragCreate.parentId){
+        // dropped on an existing node -> reparent it under dragCreate.parentId
+        const draggedOnto = targetNode.dataset.id;
+        if(!isDescendant(draggedOnto, dragCreate.parentId)){
+          reparent(draggedOnto, dragCreate.parentId);
+          if(!state.openPath.includes(dragCreate.parentId)) openPathTo(dragCreate.parentId);
+          render();
+        }
+      } else {
+        // dropped on empty canvas -> create new child node here
+        openModal({parentId: dragCreate.parentId});
+      }
+      dragCreate = null;
+    }
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchmove", move, {passive:true});
+    window.addEventListener("touchend", up);
+  }
+
+  function openPathTo(id){
+    let path=[]; let cur = state.nodes[id];
+    while(cur){ path.unshift(cur.id); cur = cur.parent_id? state.nodes[cur.parent_id]:null; }
+    state.openPath = path;
+  }
+
+  function bindNodeEvents(){
+    document.querySelectorAll(".node").forEach(div=>{
+      const id = div.dataset.id;
+      div.querySelectorAll('[data-action="toggle"]').forEach(elm=>{
+        elm.addEventListener("click", (e)=>{ e.stopPropagation(); toggleOpen(id); });
+      });
+      const favBtn = div.querySelector('[data-action="fav"]');
+      if(favBtn) favBtn.addEventListener("click", (e)=>{ e.stopPropagation(); state.nodes[id].favorite=!state.nodes[id].favorite; render(); });
+      const editBtn = div.querySelector('[data-action="edit"]');
+      if(editBtn) editBtn.addEventListener("click", (e)=>{ e.stopPropagation(); openModal({editId:id}); });
+      const handle = div.querySelector('[data-action="handle"]');
+      if(handle){
+        handle.addEventListener("mousedown", (e)=>startHandleDrag(id,e));
+        handle.addEventListener("touchstart", (e)=>startHandleDrag(id,e), {passive:false});
+      }
+    });
+  }
+
+  /* ---------- modal ---------- */
+  function buildIconPicker(){
+    const wrap = el("iconPicker"); wrap.innerHTML="";
+    ICONS.forEach(ic=>{
+      const b = document.createElement("button"); b.type="button"; b.textContent=ic;
+      if(ic===selectedIcon) b.classList.add("selected");
+      b.addEventListener("click", ()=>{ selectedIcon=ic; wrap.querySelectorAll("button").forEach(x=>x.classList.remove("selected")); b.classList.add("selected"); });
+      wrap.appendChild(b);
+    });
+  }
+  function openModal({parentId=null, editId=null}={}){
+    editingNodeId = editId; creatingParentId = parentId;
+    el("modalTitle").textContent = editId? "Редактировать узел" : "Новый узел";
+    el("deleteNodeBtn").hidden = !editId;
+    if(editId){
+      const n = state.nodes[editId];
+      el("fTitle").value=n.title; el("fType").value=n.type; el("fAccess").value=n.access;
+      el("fUrl").value=n.url; el("fNotes").value=n.notes; selectedIcon = n.icon||ICONS[0];
+    } else {
+      el("fTitle").value=""; el("fType").value=""; el("fAccess").value=""; el("fUrl").value=""; el("fNotes").value="";
+      selectedIcon = ICONS[0];
+    }
+    buildIconPicker();
+    el("modalOverlay").hidden=false;
+    setTimeout(()=>el("fTitle").focus(),30);
+  }
+  function closeModal(){ el("modalOverlay").hidden=true; editingNodeId=null; creatingParentId=null; }
+  function saveModal(){
+    const title = el("fTitle").value.trim();
+    if(!title){ el("fTitle").focus(); return; }
+    const data = { title, icon:selectedIcon, type:el("fType").value.trim(), access:el("fAccess").value.trim(), url:el("fUrl").value.trim(), notes:el("fNotes").value.trim() };
+    if(editingNodeId){ Object.assign(state.nodes[editingNodeId], data, {updated_at:Date.now()}); }
+    else{
+      const id = createNode({...data, parent_id: creatingParentId});
+      if(creatingParentId) openPathTo(creatingParentId);
+    }
+    closeModal(); render();
+  }
+  function deleteCurrentNode(){
+    if(!editingNodeId) return;
+    const node = state.nodes[editingNodeId];
+    let cascade = true;
+    if(node.children.length) cascade = confirm("У узла есть дочерние узлы. Удалить их тоже? Отмена = перенести на уровень выше.");
+    deleteNode(editingNodeId, cascade);
+    closeModal(); render();
+  }
+
+  /* ---------- pan / zoom ---------- */
+  let scale=1, panX=40, panY=20;
+  function applyTransform(){ el("canvas").style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`; }
+  function setupPanZoom(){
+    const wrap = el("canvasWrap");
+    let dragging=false, sx=0, sy=0, ox=0, oy=0;
+    wrap.addEventListener("mousedown", (e)=>{
+      if(e.target.closest(".node")) return;
+      dragging=true; wrap.classList.add("panning"); sx=e.clientX; sy=e.clientY; ox=panX; oy=panY;
+    });
+    window.addEventListener("mousemove", (e)=>{ if(!dragging) return; panX=ox+(e.clientX-sx); panY=oy+(e.clientY-sy); applyTransform(); });
+    window.addEventListener("mouseup", ()=>{ dragging=false; wrap.classList.remove("panning"); });
+    wrap.addEventListener("wheel", (e)=>{ e.preventDefault(); const d=e.deltaY>0?-0.08:0.08; scale=Math.min(2,Math.max(0.4,scale+d)); applyTransform(); }, {passive:false});
+
+    let td=null, ts=1;
+    wrap.addEventListener("touchstart",(e)=>{
+      if(e.touches.length===1 && !e.target.closest(".node")){ dragging=true; sx=e.touches[0].clientX; sy=e.touches[0].clientY; ox=panX; oy=panY; }
+      else if(e.touches.length===2){ td=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); ts=scale; }
+    },{passive:true});
+    wrap.addEventListener("touchmove",(e)=>{
+      if(e.touches.length===1 && dragging){ panX=ox+(e.touches[0].clientX-sx); panY=oy+(e.touches[0].clientY-sy); applyTransform(); }
+      else if(e.touches.length===2 && td){ const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); scale=Math.min(2,Math.max(0.4, ts*(d/td))); applyTransform(); }
+    },{passive:true});
+    wrap.addEventListener("touchend", ()=>{ dragging=false; td=null; });
+
+    el("zoomIn").addEventListener("click", ()=>{ scale=Math.min(2,scale+0.15); applyTransform(); });
+    el("zoomOut").addEventListener("click", ()=>{ scale=Math.max(0.4,scale-0.15); applyTransform(); });
+    el("zoomReset").addEventListener("click", ()=>{ scale=1; panX=40; panY=20; applyTransform(); });
+  }
+
+  /* ---------- import / export ---------- */
+  function exportJson(){
+    const blob = new Blob([JSON.stringify({nodes:state.nodes, rootIds:state.rootIds}, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download="graph-export.json"; a.click();
+    URL.revokeObjectURL(url);
+  }
+  function importJson(file){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const data = JSON.parse(reader.result);
+        if(data.nodes && data.rootIds){ state.nodes=data.nodes; state.rootIds=data.rootIds; state.openPath=[]; render(); }
+        else alert("Неверный формат файла");
+      }catch(e){ alert("Не удалось прочитать файл"); }
+    };
+    reader.readAsText(file);
+  }
+
+  /* ---------- init ---------- */
+  function init(){
+    load(); setupPanZoom(); applyTransform(); render();
+
+    el("newRootBtn").addEventListener("click", ()=>openModal({}));
+    el("emptyCreateBtn").addEventListener("click", ()=>openModal({}));
+    el("cancelBtn").addEventListener("click", closeModal);
+    el("saveNodeBtn").addEventListener("click", saveModal);
+    el("deleteNodeBtn").addEventListener("click", deleteCurrentNode);
+    el("modalOverlay").addEventListener("click", (e)=>{ if(e.target.id==="modalOverlay") closeModal(); });
+    document.addEventListener("keydown", (e)=>{ if(e.key==="Escape" && !el("modalOverlay").hidden) closeModal(); });
+
+    el("backBtn").addEventListener("click", ()=>{ state.openPath = state.openPath.slice(0,-1); render(); });
+    el("searchInput").addEventListener("input", render);
+    el("typeFilter").addEventListener("change", render);
+    el("accessFilter").addEventListener("change", render);
+    el("favToggle").addEventListener("click", ()=>{ el("favToggle").classList.toggle("active"); render(); });
+
+    document.addEventListener("keydown", (e)=>{
+      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="e"){ e.preventDefault(); exportJson(); }
+      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="i"){ e.preventDefault(); el("importInput").click(); }
+    });
+    el("importInput").addEventListener("change", (e)=>{ if(e.target.files[0]) importJson(e.target.files[0]); e.target.value=""; });
+  }
+  document.addEventListener("DOMContentLoaded", init);
+})();
+</script>
+</body>
+</html>
